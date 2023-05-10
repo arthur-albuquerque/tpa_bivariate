@@ -192,8 +192,8 @@ m1 |>
                      labels = c(0.5, seq(1, 4, 1))) +
   coord_cartesian(x = log(c(0.25, 1.6)),
                   y = log(c(0.5, 4.5))) +
-  labs(x = "Odds Ratio (death)",
-       y = "Odds Ratio (major bleeding)") +
+  labs(x = "Risk Ratio (death)",
+       y = "Risk Ratio (major bleeding)") +
   ggdist::theme_ggdist()
 ```
 
@@ -201,13 +201,13 @@ Bivariate analyses allow one to ask conditional probabilities, such as:
 
 What is the posterior probability that...
 
-- OR_death < 1.0 AND OR_bleeding < 1.0? (q1)
+- RR_death < 1.0 AND RR_bleeding < 1.0? (q1)
 
-- OR_death < 1.0 AND OR_bleeding > 1.0? (q2)
+- RR_death < 1.0 AND RR_bleeding > 1.0? (q2)
 
-- OR_death < 1.0 AND OR_bleeding > 2.0? (q3)
+- RR_death < 1.0 AND RR_bleeding > 2.0? (q3)
 
-- OR_death > 1.0 AND OR_bleeding > 1.0? (q4)
+- RR_death > 1.0 AND RR_bleeding > 1.0? (q4)
 
 ```{r}
 m1 |> 
