@@ -1,0 +1,220 @@
+---
+title: "Untitled"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages and data
+
+```{r}
+# Install/load packages
+pacman::p_load(here,
+               rio,
+               brms,
+               tidyr,
+               MetBrewer,
+               ggdensity,
+               cmdstanr,
+               bayesmeta,
+               tidybayes,
+               posterior,
+               tidyverse,
+               metafor,
+               gt)
+
+# Load death data
+d1 = import(here("data", "tpa.xlsx")) |> 
+  transform(outcome = "death")
+
+# Load bleeding data
+d2 = import(here("data", "tpa2.xlsx")) |> 
+  transform(outcome = "bleed")
+
+d = rbind(d1, d2)
+
+```
+
+Estimate log risk ratios
+
+```{r}
+d_logRR = 
+  metafor::escalc(
+  measure = "OR", # log odds ratio,
+  
+  # tPA
+  ai = r2,
+  n1i = n2,
+  
+  # AC
+  ci = r1,
+  n2i = n1,
+  
+  data = d
+)
+```
+
+Construct a variance-covariance matrix assuming within-study correlation = $0.5$ 
+
+```{r}
+
+V = metafor::vcalc(vi, cluster=study, type=outcome, rho=0.5, data=d_logRR)
+
+```
+
+Fit a Bayesian bivariate meta-analysis. Further methodological details in
+[Burke et al. 2016](https://journals.sagepub.com/doi/10.1177/0962280216631361).
+
+```{r}
+# Specify formula
+mf = 
+  brms::bf(yi ~ 0 + outcome + (0 + outcome|study) + fcor(V))
+
+get_prior(mf, 
+          data = d_logRR,
+          data2 = list(V = V),
+          family = gaussian)
+```
+
+Extract informative priors for between-study heterogeneity from [Turner et al. 2014](https://onlinelibrary.wiley.com/doi/10.1002/sim.6381)
+
+```{r}
+tau_death = bayesmeta::TurnerEtAlPrior("all-cause mortality",
+                                       "pharmacological",
+                                       "placebo / control")
+
+bleed_death = bayesmeta::TurnerEtAlPrior("adverse events",
+                                         "pharmacological",
+                                         "placebo / control")
+
+logmean_death = tau_death$parameters["tau", "mu"] # -1.975 
+logsd_death = tau_death$parameters["tau", "sigma"] # 0.67
+
+logmean_bleed = bleed_death$parameters["tau", "mu"] # -0.935 
+logsd_bleed = bleed_death$parameters["tau", "sigma"] # 0.76
+
+
+```
+
+Define priors (weakly informative for treatment effects, informative 
+for between-study heterogeneities, and weakly informative for the correlation parameters)
+
+```{r}
+priors = 
+  prior(normal(0, 0.75), class = "b", coef = "outcomedeath") +
+  prior(normal(0, 0.75), class = "b", coef = "outcomebleed") +
+  prior(lognormal(-1.975, 0.67), class = "sd", coef = "outcomedeath", group = "study") +
+  prior(lognormal(-0.935, 0.76), class = "sd", coef = "outcomebleed", group = "study") +
+  prior(lkj(2), class = cor) +
+  prior(constant(1), class = "sigma")
+```
+
+Fit model
+
+```{r}
+
+m1 = brms::brm(
+  formula = mf,
+  prior = priors,
+  data = d_logRR,
+  data2 = list(V = V),
+  family = gaussian,
+  
+  warmup = 2000, 
+  iter = 4000,
+  chains = 4,
+  cores = parallel::detectCores(),
+  seed = 123,
+  backend = "cmdstanr",
+  
+  file = here::here("model", "m1.Rds"),
+  file_refit = "on_change"
+)
+
+```
+
+```{r}
+parameters = 
+  m1 |> 
+  tidy_draws() |> 
+  reframe("ATE: Death" = b_outcomedeath,
+          "ATE: Major Bleeding" = b_outcomebleed,
+            
+          "Tau: Death" = sd_study__outcomedeath,
+          "Tau: Major Bleeding" = sd_study__outcomebleed,
+            
+          "Correlation" = cor_study__outcomebleed__outcomedeath) |> 
+  pivot_longer(everything()) |> 
+  group_by(name) |> 
+  median_hdi(value) |> 
+  mutate(across(value:.upper, ~round(., 2))) |> 
+  select(-c(.width:.interval))
+
+parameters |> 
+  filter(str_detect(name, "ATE")) |> 
+  mutate(across(-name, ~round(exp(.), 2))) |> 
+  summarise(Parameter = name, 
+            "Median [95% CrI]" = str_c(value, " [", .lower, ", ", .upper, "]")) |> 
+  
+  rbind(
+    parameters |> 
+    filter(str_detect(name, "ATE", negate = T)) |> 
+    summarise(Parameter = name, 
+              "Median [95% CrI]" = str_c(value, " [", .lower, ", ", .upper, "]"))
+  ) |> 
+  gt()
+```
+
+ATE = average treatment effect (linear scale)
+Tau = Between-study variance (log scale)
+
+Let's visualize the bivariate distribution of both ATEs.
+
+```{r}
+m1 |> 
+  tidybayes::tidy_draws() |> 
+  ggplot() +
+  aes(x = b_outcomedeath, b_outcomebleed) +
+  ggdensity::geom_hdr(
+    probs = c(0.95, 0.8, 0.5),
+    aes(fill = after_stat(probs)), 
+    alpha = 1
+  ) +
+  scale_fill_manual(values = met.brewer("OKeeffe2", 3)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_vline(xintercept = 0, linetype = 2) +
+  scale_x_continuous(breaks = log(c(0.25, 0.75, seq(0.5, 1.5, 0.5))),
+                     labels = c(0.25, 0.75, seq(0.5, 1.5, 0.5))) +
+  
+  scale_y_continuous(breaks = log(c(0.5, seq(1, 4, 1))),
+                     labels = c(0.5, seq(1, 4, 1))) +
+  coord_cartesian(x = log(c(0.25, 1.6)),
+                  y = log(c(0.5, 4.5))) +
+  labs(x = "Odds Ratio (death)",
+       y = "Odds Ratio (major bleeding)") +
+  ggdist::theme_ggdist()
+```
+
+Bivariate analyses allow one to ask conditional probabilities, such as:
+
+What is the posterior probability that...
+
+- OR_death < 1.0 AND OR_bleeding < 1.0? (q1)
+
+- OR_death < 1.0 AND OR_bleeding > 1.0? (q2)
+
+- OR_death < 1.0 AND OR_bleeding > 2.0? (q3)
+
+- OR_death > 1.0 AND OR_bleeding > 1.0? (q4)
+
+```{r}
+m1 |> 
+  tidybayes::tidy_draws() |> 
+  reframe(q1 = mean(b_outcomedeath < log(1) & b_outcomebleed < log(1)),
+          q2 = mean(b_outcomedeath < log(1) & b_outcomebleed > log(1)),
+          q3 = mean(b_outcomedeath < log(1) & b_outcomebleed > log(2)),
+          q4 = mean(b_outcomedeath > log(1) & b_outcomebleed > log(1)))
+```
+
