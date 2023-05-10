@@ -42,7 +42,7 @@ Estimate log risk ratios
 ```{r}
 d_logRR = 
   metafor::escalc(
-  measure = "OR", # log odds ratio,
+  measure = "RR", # log risk ratio,
   
   # tPA
   ai = r2,
@@ -103,8 +103,8 @@ for between-study heterogeneities, and weakly informative for the correlation pa
 
 ```{r}
 priors = 
-  prior(normal(0, 0.75), class = "b", coef = "outcomedeath") +
-  prior(normal(0, 0.75), class = "b", coef = "outcomebleed") +
+  prior(normal(0, 0.82), class = "b", coef = "outcomedeath") +
+  prior(normal(0, 0.82), class = "b", coef = "outcomebleed") +
   prior(lognormal(-1.975, 0.67), class = "sd", coef = "outcomedeath", group = "study") +
   prior(lognormal(-0.935, 0.76), class = "sd", coef = "outcomebleed", group = "study") +
   prior(lkj(2), class = cor) +
