@@ -155,14 +155,14 @@ parameters =
 parameters |> 
   filter(str_detect(name, "ATE")) |> 
   mutate(across(-name, ~round(exp(.), 2))) |> 
-  summarise(Parameter = name, 
-            "Median [95% CrI]" = str_c(value, " [", .lower, ", ", .upper, "]")) |> 
+  reframe(Parameter = name, 
+          "Median [95% CrI]" = str_c(value, " [", .lower, ", ", .upper, "]")) |> 
   
   rbind(
     parameters |> 
     filter(str_detect(name, "ATE", negate = T)) |> 
-    summarise(Parameter = name, 
-              "Median [95% CrI]" = str_c(value, " [", .lower, ", ", .upper, "]"))
+    reframe(Parameter = name, 
+            "Median [95% CrI]" = str_c(value, " [", .lower, ", ", .upper, "]"))
   ) |> 
   gt()
 ```
@@ -215,6 +215,7 @@ m1 |>
   reframe(q1 = mean(b_outcomedeath < log(1) & b_outcomebleed < log(1)),
           q2 = mean(b_outcomedeath < log(1) & b_outcomebleed > log(1)),
           q3 = mean(b_outcomedeath < log(1) & b_outcomebleed > log(2)),
-          q4 = mean(b_outcomedeath > log(1) & b_outcomebleed > log(1)))
+          q4 = mean(b_outcomedeath > log(1) & b_outcomebleed > log(1))) |> 
+  gt()
 ```
 
